@@ -1,0 +1,168 @@
+# Hyperparameter Configuration Reference
+# This file documents all hyperparameters used in training
+
+# ============================================================================
+# SUPERVISED PRETRAINING HYPERPARAMETERS
+# ============================================================================
+supervised_pretraining:
+  # Data Configuration
+  num_samples: 100000        # Total training examples
+  max_digits: 4              # Maximum operand size (1-4 digits)
+  operations: ['+', '-']     # Supported operations
+  
+  # Model Architecture
+  embed_dim: 192             # Embedding dimension
+  num_heads: 6               # Number of attention heads
+  num_layers: 6              # Number of transformer layers
+  max_len: 20                # Maximum sequence length
+  dropout: 0.1               # Dropout rate
+  vocab_size: 15             # [0-9, +, -, =, <EOS>, <PAD>]
+  
+  # Training Configuration
+  batch_size: 512            # Batch size
+  learning_rate: 3e-4        # Initial learning rate (AdamW)
+  epochs: 20                 # Total training epochs
+  scheduler: "CosineAnnealingLR"
+  scheduler_t_max: 20        # Cosine annealing period
+  
+  # Optimization
+  optimizer: "AdamW"
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1e-8
+  
+  # Loss Function
+  criterion: "CrossEntropyLoss"
+  ignore_index: 14           # <PAD> token ID
+  
+  # Early Stopping
+  early_stopping_loss: 0.05  # Stop if loss < threshold
+
+# ============================================================================
+# RL FINE-TUNING HYPERPARAMETERS
+# ============================================================================
+rl_finetuning:
+  # Episode Configuration
+  total_episodes: 7000
+  batch_size: 128            # Gradient accumulation steps
+  
+  # Model Configuration
+  embed_dim: 192
+  num_heads: 6
+  num_layers: 6
+  max_len: 20
+  vocab_size: 15
+  
+  # RL Hyperparameters
+  learning_rate: 1e-5        # Lower than supervised (2x-10x smaller)
+  temperature: 1.0           # Sampling temperature (higher = more exploration)
+  entropy_coef: 0.01         # Entropy regularization coefficient
+  
+  # Curriculum Learning
+  curriculum:
+    # Phase 1: 2-Digit Arithmetic
+    phase1:
+      start_episode: 1
+      end_episode: 1200
+      max_digits: 2
+      
+    # Smooth Transition 1: 2→3 Digit
+    mix1:
+      start_episode: 1200
+      end_episode: 1700
+      duration: 500
+      from_max_digits: 2
+      to_max_digits: 3
+      
+    # Phase 2: 3-Digit Arithmetic
+    phase2:
+      start_episode: 1700
+      end_episode: 3200
+      max_digits: 3
+      
+    # Smooth Transition 2: 3→4 Digit
+    mix2:
+      start_episode: 3200
+      end_episode: 3700
+      duration: 500
+      from_max_digits: 3
+      to_max_digits: 4
+      
+    # Phase 3: 4-Digit Arithmetic
+    phase3:
+      start_episode: 3700
+      end_episode: 7000
+      max_digits: 4
+  
+  # Reward Configuration
+  reward:
+    correct_answer: 1.0        # Reward for exact match
+    correct_digit_count: 0.1   # Partial credit for digit count match
+    invalid_output: -0.1       # Penalty for gibberish/silence
+    
+  # Reward Baseline (Advantage Calculation)
+  baseline_smoothing: 0.05     # Exponential moving average factor
+  
+  # Prioritized Replay Buffer
+  replay_buffer:
+    size: 500                  # Maximum buffer size
+    threshold: 0.99            # Reward threshold for storing (reward < threshold)
+    sampling_prob: 0.25        # 25% chance to sample from buffer per episode
+  
+  # Generation
+  max_new_tokens: 9            # Maximum tokens to generate (for 5-digit answers)
+  
+  # Gradient Control
+  max_grad_norm: 1.0           # Gradient clipping threshold
+  
+  # Dataset Sizes
+  dataset_sizes:
+    easy: 10000                # 2-digit examples
+    medium: 10000              # 3-digit examples
+    hard: 20000                # 4-digit examples (larger for harder task)
+
+# ============================================================================
+# EVALUATION HYPERPARAMETERS
+# ============================================================================
+evaluation:
+  num_samples: 50             # Test on 50 examples
+  max_digits: 4               # Evaluate on hardest task
+  
+  print_first_n: 10           # Print first 10 predictions
+  
+  models_to_evaluate:
+    - path: "pretrained_arithmetic.pth"
+      name: "Pretrained Model"
+    - path: "rl_arithmetic_replay.pth"
+      name: "RL Fine-Tuned Model"
+
+# ============================================================================
+# NOTES ON HYPERPARAMETER TUNING
+# ============================================================================
+# 
+# Learning Rate:
+#   - Supervised: 3e-4 is aggressive but safe with cosine annealing
+#   - RL: 1e-5 is intentionally small (2x smaller = prevents divergence)
+#   - Rule: RL_LR ≈ 1/10 * Supervised_LR
+#
+# Batch Size:
+#   - Supervised: 512 requires ~2GB GPU memory
+#   - RL: 128 is accumulation count (update every 128 episodes)
+#
+# Temperature:
+#   - 1.0: Balanced exploration vs. exploitation
+#   - > 1.0: More exploration (but slow convergence)
+#   - < 1.0: More exploitation (but mode collapse risk)
+#
+# Entropy Coefficient:
+#   - 0.01: Small enough not to dominate policy loss
+#   - Prevents model from always predicting same token
+#
+# Curriculum Smoothing:
+#   - 500-episode transitions prevent "cliff" collapse
+#   - Linear probability ramp: prob = (ep - start) / duration
+#
+# Replay Buffer:
+#   - threshold=0.99: Store when reward < 1.0 (all failures)
+#   - prob=0.25: 25% of training on replayed hard examples
+#   - size=500: Large enough to cover diverse failures
