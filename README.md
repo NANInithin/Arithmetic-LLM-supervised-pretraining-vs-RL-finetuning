@@ -38,6 +38,3 @@ The model learns to output character-level solutions (e.g., input `12+3=` -> out
 2. Install the required dependencies:
    ```bash
    pip install -r requirements.txt
-2. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
