@@ -1,4 +1,4 @@
-# RL Fine-Tuning for Arithmetic with Curriculum Learning
+# Arithmetic LLM: Supervised Pretraining vs RL Fine-Tuning
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
@@ -34,8 +34,8 @@ A comprehensive deep learning project investigating whether **Reinforcement Lear
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/yourusername/rl-arithmetic-finetuning.git
-cd rl-arithmetic-finetuning
+git clone https://github.com/NANInithin/Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning.git
+cd Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning
 
 # 2. Create virtual environment (recommended)
 python -m venv venv
@@ -70,11 +70,12 @@ python src/plot.py
 ## 📂 Project Structure
 
 ```
-rl-arithmetic-finetuning/
+Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning/
 │
 ├── README.md                      # This file
-├── requirements.txt               # Python dependencies
-├── .gitignore                     # Git ignore patterns
+├── GETTING_STARTED.md             # Step-by-step setup guide
+├── CHANGELOG.md                   # Version history
+├── CONTRIBUTING.md                # Contribution guidelines
 ├── LICENSE                        # MIT License
 │
 ├── src/                           # Source code
@@ -229,6 +230,7 @@ python src/evaluate.py
 ```python
 from src.model import MiniTransformer
 from src.dataset import ArithmeticTokenizer
+import torch
 
 tokenizer = ArithmeticTokenizer()
 model = MiniTransformer(tokenizer, embed_dim=192, num_heads=6, num_layers=6)
@@ -300,6 +302,8 @@ Contributions welcome! Areas for improvement:
 4. Push to branch: `git push origin feature/your-feature`
 5. Open a Pull Request
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+
 ---
 
 ## 📜 License
@@ -310,17 +314,16 @@ This project is licensed under the **MIT License** — see [LICENSE](LICENSE) fo
 
 ## 📧 Contact & Citation
 
-**Author:** [Your Name]  
-**Email:** your.email@example.com  
-**GitHub:** [@yourusername](https://github.com/yourusername)
+**Author:** Nithin Nani  
+**GitHub:** [@NANInithin](https://github.com/NANInithin)
 
 If you use this code in research, please cite:
 ```bibtex
 @software{arithmetic_rl_2025,
-  title={RL Fine-Tuning for Arithmetic with Curriculum Learning},
-  author={Your Name},
+  title={Arithmetic LLM: Supervised Pretraining vs RL Fine-Tuning},
+  author={Nani, Nithin},
   year={2025},
-  url={https://github.com/yourusername/rl-arithmetic-finetuning}
+  url={https://github.com/NANInithin/Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning}
 }
 ```
 
