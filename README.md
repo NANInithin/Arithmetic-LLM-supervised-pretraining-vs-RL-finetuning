@@ -4,12 +4,6 @@ A "from-scratch" implementation of a Tiny Transformer trained to solve arithmeti
 
 The model learns to output character-level solutions (e.g., input `12+3=` -> output `15`).
 
-# 🧮 Arithmo-Transformer: Supervised vs. RL Training
-
-A "from-scratch" implementation of a Tiny Transformer trained to solve arithmetic problems (addition and subtraction of up to 4 digits). This project compares **Supervised Pretraining** against **Reinforcement Learning (RL)** fine-tuning strategies.
-
-The model learns to output character-level solutions (e.g., input `12+3=` -> output `15`).
-
 ![Training Results](training_results.png)
 
 ## 🌟 Key Features
