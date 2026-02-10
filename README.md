@@ -33,7 +33,7 @@ The following visualizations demonstrate the model's learning progression across
 
 #### Supervised Pretraining Loss
 
-![Supervised Loss](loss.jpg)
+![Supervised Loss](loss.png)
 
 *Supervised training loss curve showing stable convergence from 1.7057 (Epoch 1) to 1.1567 (Epoch 25). The smooth descent indicates effective learning of arithmetic patterns with reverse digit ordering.*
 
@@ -41,19 +41,19 @@ The following visualizations demonstrate the model's learning progression across
 
 **Episode Reward:**
 
-![Episode Reward](episode_reward.jpg)
+![Episode Reward](episode_reward.png)
 
 *Episode-by-episode reward progression across all 7000 training episodes. Frequent spikes to 1.0 demonstrate successful correct predictions throughout all curriculum phases (Easy → Medium → Hard transitions visible at episodes 1200, 1700, 3200, 3700).*
 
 **Running Reward:**
 
-![Running Reward](running_reward.jpg)
+![Running Reward](running_reward.png)
 
 *Exponentially smoothed running reward (α=0.05) showing steady improvement from initial values to sustained 0.95-1.0 range. The smooth progression indicates effective curriculum learning without catastrophic forgetting during difficulty transitions.*
 
 **Batch Loss:**
 
-![Batch Loss](batch_loss.jpg)
+![Batch Loss](batch_loss.png)
 
 *Policy gradient batch loss (gradient accumulation over 128 episodes) stabilizing around -0.05 to -0.15 after initial adjustment period. Negative values reflect positive advantages from baseline subtraction, indicating consistent policy improvement.*
 
@@ -61,13 +61,13 @@ The following visualizations demonstrate the model's learning progression across
 
 **Pretrained Model:**
 
-![Pretrained Accuracy](Pretrained_accuracy.jpg)
+![Pretrained Accuracy](Pretrained_accuracy.png)
 
 *The supervised pretrained model achieves **98.60% accuracy** (493/500 correct) on the 4-digit arithmetic test set, demonstrating that reverse digit generation and scaled architecture provide a strong foundation.*
 
 **RL Fine-Tuned Model:**
 
-![RL Fine-Tuned Accuracy](RL_FineTuned_accuracy.jpg)
+![RL Fine-Tuned Accuracy](RL_FineTuned_accuracy.png)
 
 *After RL fine-tuning with curriculum learning and prioritized replay, the model achieves **99.80% accuracy** (499/500 correct), successfully addressing edge cases that remained after supervised pretraining.*
 
