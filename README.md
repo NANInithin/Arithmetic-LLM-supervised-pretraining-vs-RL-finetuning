@@ -5,9 +5,9 @@
 [![MLflow](https://img.shields.io/badge/MLflow-2.0+-blue.svg)](https://mlflow.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A comprehensive PyTorch implementation comparing supervised pretraining and reinforcement learning fine-tuning approaches for teaching transformer models to perform multi-digit arithmetic operations. This project demonstrates the power of combining both paradigms to achieve **100% accuracy** on complex arithmetic tasks including addition, subtraction, and multiplication with up to 4-digit operands.
+A comprehensive PyTorch implementation comparing supervised pretraining and reinforcement learning fine-tuning approaches for teaching transformer models to perform multi-digit arithmetic operations. This project demonstrates the power of combining both paradigms to achieve **near-perfect accuracy** on complex arithmetic tasks including addition, subtraction, and multiplication with up to 4-digit operands.
 
-**Key Achievement:** Through scaled architecture (8-layer, 256-dim transformer), curriculum learning, dense reward shaping, and prioritized replay, the model achieves **100% accuracy** on 4-digit arithmetic after RL fine-tuning, up from 99% with supervised pretraining alone.
+**Key Achievement:** Through scaled architecture (8-layer, 256-dim transformer), curriculum learning, dense reward shaping, and prioritized replay, the model achieves **99.80% accuracy** on 4-digit arithmetic after RL fine-tuning, up from 98.60% with supervised pretraining alone.
 
 ---
 
@@ -74,18 +74,22 @@ The following visualizations demonstrate the model's learning progression across
 ### Sample Predictions from Evaluation
 
 **Pretrained Model Examples:**
+```
 682+4=       | 686        | ✅
 6796-835=    | 5961       | ✅
 75*29=       | 2175       | ✅
 99*72=       | 7128       | ✅
 58*97=       | 5626       | ✅
+```
 
 **RL Fine-Tuned Model Examples:**
+```
 9935-9895=   | 40         | ✅
 6359+362=    | 6721       | ✅
 9133-3193=   | 5940       | ✅
 71*77=       | 5467       | ✅
 3823-666=    | 3157       | ✅
+```
 
 ### Performance Breakdown
 
@@ -109,6 +113,7 @@ The following visualizations demonstrate the model's learning progression across
 
 ### Installation
 
+```bash
 # 1. Clone the repository
 git clone https://github.com/NANInithin/Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning.git
 cd Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning
@@ -126,14 +131,18 @@ pip install -r requirements.txt
 
 # 4. Install package in development mode
 pip install -e .
+```
 
 ### Run Complete Pipeline
 
 Execute the entire training and evaluation pipeline with a single command:
 
+```bash
 python run_pipeline.py
+```
 
 **Expected Output:**
+```
 Cleaning local workspace...
 ✅ Logged configs/hyperparams.yaml to MLflow.
 ✅ Logged requirements.txt to MLflow.
@@ -158,6 +167,7 @@ Final Accuracy for RL_FineTuned: 499/500 (99.80%)
 ==================================================
 [PIPELINE COMPLETE SUCCESS]
 ==================================================
+```
 
 **Pipeline Stages:**
 1. **Cleanup:** Removes old local log files (`supervised_loss.npy`, `rl_rewards_replay.npy`)
@@ -171,7 +181,9 @@ Final Accuracy for RL_FineTuned: 499/500 (99.80%)
 
 Start the MLflow UI to visualize training metrics:
 
+```bash
 mlflow ui
+```
 
 Navigate to [http://127.0.0.1:5000](http://127.0.0.1:5000) to explore:
 - Loss curves and reward progression
@@ -183,6 +195,7 @@ Navigate to [http://127.0.0.1:5000](http://127.0.0.1:5000) to explore:
 
 ## 📂 Project Structure
 
+```
 Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning/
 │
 ├── README.md                      # This file
@@ -211,6 +224,7 @@ Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning/
 │
 └── outputs/                       # Generated visualizations (auto-created)
     └── training_results.png
+```
 
 ---
 
@@ -232,6 +246,7 @@ A decoder-only Transformer optimized for arithmetic reasoning:
 
 **Key Design Choice:** Reverse digit generation (right-to-left) aligns with manual arithmetic computation, reducing error propagation.
 
+```python
 MiniTransformer(
     embed_dim=256,          # Embedding dimension
     num_heads=8,            # Multi-head attention
@@ -240,6 +255,7 @@ MiniTransformer(
     dropout=0.1,            # Dropout rate
     vocab_size=16           # Token vocabulary
 )
+```
 
 ### Curriculum Learning Strategy
 
@@ -294,6 +310,7 @@ Five-phase progressive training with smooth transitions:
 
 Traditional sparse rewards (1.0 for correct, 0.0 for wrong) lead to slow learning. Our dense reward function:
 
+```python
 def compute_reward(prediction, target):
     """
     Dense reward with partial credit for digit-by-digit matching
@@ -317,6 +334,7 @@ def compute_reward(prediction, target):
             break  # Stop at first mismatch
     
     return min(reward, 0.9)  # Cap partial reward below perfect
+```
 
 **Why this works:**
 - Provides learning signal even for incorrect answers
@@ -336,6 +354,7 @@ def compute_reward(prediction, target):
 - **Purpose:** Prevent catastrophic forgetting and focus on tail distribution
 
 **Implementation:**
+```python
 # Store failures
 if reward < 0.99 and not is_replay:
     hard_buffer.append(example)
@@ -347,65 +366,7 @@ if len(hard_buffer) > 50 and np.random.rand() < 0.25:
     example = random.choice(hard_buffer)  # Replay
 else:
     example = sample_from_current_curriculum()  # Normal
-
----
-
-## 📈 Results Visualization
-
-### Training Metrics from MLflow
-
-The following visualizations demonstrate the model's learning progression across both training phases:
-
-#### Supervised Pretraining Loss
-
-![Supervised Loss](https://agi-prod-file-upload-public-main-use1.s3.amazonaws.com/aa2e2090-f92d-4ee1-a5e3-b181162a02e1)
-
-*Supervised training loss decreases from ~1.7 to ~1.15 over 25 epochs, demonstrating stable convergence with reverse digit ordering. The smooth descent indicates effective learning of arithmetic patterns.*
-
-#### RL Fine-Tuning Metrics
-
-**Episode Reward:**
-
-![Episode Reward](https://agi-prod-file-upload-public-main-use1.s3.amazonaws.com/eaf01a36-9815-4c02-8cbf-f392969fb02a)
-
-*Episode rewards show dense reward shaping in action, with frequent spikes to 1.0 (perfect answers) throughout training. The sustained high rewards across curriculum phases demonstrate effective policy learning.*
-
-**Running Reward:**
-
-![Running Reward](https://agi-prod-file-upload-public-main-use1.s3.amazonaws.com/4b8523da-aaa7-4e7d-adf4-8e5dd356884d)
-
-*Exponentially smoothed running reward (α=0.05) demonstrates steady improvement from ~0 to ~0.95-1.0, showing effective curriculum learning progression through all five phases without catastrophic forgetting.*
-
-**Batch Loss:**
-
-![Batch Loss](https://agi-prod-file-upload-public-main-use1.s3.amazonaws.com/fdb1e124-0806-46a7-8e32-2208d48156eb)
-
-*Policy gradient batch loss stabilizes around -0.05 to -0.15 after initial fluctuation, indicating consistent policy improvement through gradient accumulation. The negative values reflect positive advantages from baseline subtraction.*
-
-#### Final Evaluation Accuracy
-
-**Pretrained Model:**
-
-![Pretrained Accuracy](https://agi-prod-file-upload-public-main-use1.s3.amazonaws.com/060f228d-7fa6-4fe1-8239-e05c12dea06c)
-
-*The supervised pretrained model achieves **99% accuracy** on the 4-digit arithmetic test set (500 examples), demonstrating that reverse digit generation and scaled architecture provide a strong foundation.*
-
-**RL Fine-Tuned Model:**
-
-![RL Fine-Tuned Accuracy](https://agi-prod-file-upload-public-main-use1.s3.amazonaws.com/3a6aa984-dedf-4330-a30f-0dfdd7873dd7)
-
-*After RL fine-tuning with curriculum learning and prioritized replay, the model achieves **100% accuracy** on the same test set, eliminating all remaining edge case errors.*
-
-### Performance Breakdown
-
-| Operation | Pretrained | RL Fine-tuned |
-|-----------|------------|---------------|
-| Addition | ~99% | 100% |
-| Subtraction | ~99% | 100% |
-| Multiplication | ~99% | 100% |
-| **Overall** | **99%** | **100%** |
-
-**Key Insight:** The pretrained model already achieves near-perfect accuracy through scaled architecture and reverse digit ordering. RL fine-tuning eliminates the final 1% of edge cases through targeted replay and dense reward signals.
+```
 
 ---
 
@@ -415,6 +376,7 @@ All hyperparameters are documented in `configs/hyperparams.yaml`. Key settings:
 
 ### Supervised Pretraining
 
+```yaml
 supervised_pretraining:
   # Data Configuration
   num_samples: 100000
@@ -432,9 +394,11 @@ supervised_pretraining:
   learning_rate: 3e-4
   epochs: 25
   weight_decay: 0.1
+```
 
 ### RL Fine-Tuning
 
+```yaml
 rl_finetuning:
   # Episode Configuration
   total_episodes: 7000
@@ -456,6 +420,7 @@ rl_finetuning:
     size: 500
     threshold: 0.99
     sampling_prob: 0.25
+```
 
 ---
 
@@ -471,9 +436,11 @@ Generating answers **right-to-left** (units → tens → hundreds) improves lear
 4. **Simplifies carries:** Carry information flows naturally in generation direction
 
 **Example:**
+```
 Problem:  1234 + 5678 = ?
 Standard: 6 9 1 2  (left-to-right, need all carries first)
 Reverse:  2 1 9 6  (right-to-left, compute carries incrementally)
+```
 
 ### Why Curriculum Learning?
 
@@ -484,9 +451,11 @@ Progressive difficulty scaling prevents:
 - **Sample inefficiency:** Wasting episodes on problems model can't yet solve
 
 **Smooth transitions** (500-episode blending periods) are critical:
+```python
 # Linear probability ramp prevents "curriculum cliff"
 prob_hard = (episode - transition_start) / 500.0
 dataset = ds_hard if np.random.rand() < prob_hard else ds_easy
+```
 
 ### Why Prioritized Replay?
 
@@ -508,7 +477,9 @@ Storing and replaying hard examples:
 
 ### Example 1: Full Pipeline (Recommended)
 
+```bash
 python run_pipeline.py
+```
 
 Runs complete workflow:
 1. Supervised pretraining → `pretrained_arithmetic.pth`
@@ -518,17 +489,20 @@ Runs complete workflow:
 
 ### Example 2: Individual Training Stages
 
-# Stage 1: Supervised pretraining (~15 minutes on GPU)
+```bash
+# Stage 1: Supervised pretraining (~30 minutes on GPU)
 python src/train_supervised.py
 
-# Stage 2: RL fine-tuning (~40 minutes on GPU)
+# Stage 2: RL fine-tuning (~20 minutes on GPU)
 python src/train_rl.py
 
 # Stage 3: Evaluation (~1 minute)
 python src/evaluate.py
+```
 
 ### Example 3: Custom Inference
 
+```python
 import torch
 from src.model import MiniTransformer
 from src.dataset import ArithmeticTokenizer
@@ -556,6 +530,7 @@ result = tokenizer.decode(output_ids).split('=')[-1]
 # Reverse back to normal order
 final_result = result[::-1]
 print(f"{prompt} {final_result}")  # Output: "1234+5678= 6912"
+```
 
 ---
 
@@ -565,30 +540,36 @@ print(f"{prompt} {final_result}")  # Output: "1234+5678= 6912"
 
 If encountering OOM errors, reduce batch sizes:
 
+```python
 # In src/train_supervised.py
 BATCH_SIZE = 256  # Default: 512
 
 # In src/train_rl.py
 BATCH_SIZE = 64   # Default: 128
+```
 
 ### MLflow UI Not Starting
 
 Check port availability:
 
+```bash
 # Check if port 5000 is in use
 lsof -i :5000
 
 # Use alternative port
 mlflow ui --port 5001
+```
 
 ### Model Checkpoint Not Found
 
 Verify checkpoint files exist:
 
+```bash
 ls -lh *.pth
 # Expected output:
 # pretrained_arithmetic.pth (after supervised training)
 # rl_arithmetic_replay.pth (after RL fine-tuning)
+```
 
 ### Low RL Performance
 
@@ -697,14 +678,16 @@ This project is licensed under the **MIT License** — see [LICENSE](LICENSE) fi
 
 If you use this code in your research, please cite:
 
+```bibtex
 @software{arithmetic_llm_2026,
   title={Arithmetic LLM: Supervised Pretraining vs RL Fine-Tuning},
   author={NAN, Nithin},
   year={2026},
   publisher={GitHub},
   url={https://github.com/NANInithin/Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning},
-  note={Achieves 100\% accuracy on 4-digit arithmetic through curriculum learning and prioritized replay}
+  note={Achieves 99.80\% accuracy on 4-digit arithmetic through curriculum learning and prioritized replay}
 }
+```
 
 ---
 
@@ -736,6 +719,7 @@ If you use this code in your research, please cite:
 
 ## 📋 Quick Reference Commands
 
+```bash
 # Installation
 pip install -r requirements.txt
 pip install -e .
@@ -754,9 +738,10 @@ mlflow ui
 
 # Generate Plots
 python src/plot.py
+```
 
 ---
 
 **⭐ If you find this project useful, please star it on GitHub!**
 
-**🚀 Ready to train? Run `python run_pipeline.py` and achieve 100% accuracy!**
+**🚀 Ready to train? Run `python run_pipeline.py` and achieve 99.8% accuracy!**
