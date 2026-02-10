@@ -1,66 +1,50 @@
-# Python
+# --- Python Artifacts ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
-*.egg
 
-# Virtual Environments
-.venv
+# --- Virtual Environments ---
+.venv/
 venv/
 env/
-ENV/
-env.bak/
-venv.bak/
 
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
+# --- MLflow Local Tracking & Database ---
+# Exclude the local database and the run data folder
+mlruns/
+mlartifacts/
+mlflow.db
+*.db-shm
+*.db-wal
 
-# Jupyter Notebooks
-.ipynb_checkpoints
-*.ipynb
-
-# Model Weights & Logs
+# --- Model Weights & Checkpoints ---
+# We ignore the actual weights to keep the repo small
 *.pth
 *.pt
+checkpoints/
+
+# --- Training Logs & Temporary Data ---
+# Exclude local numpy logs and the logs folder you created
+logs/
 *.npy
 *.npz
-checkpoints/
-logs/
+*.log
 
-# Results & Outputs
-*.png
-*.jpg
-*.pdf
+# --- Outputs & Visualization Results ---
+# Exclude generated plots to keep the repo clean
 outputs/
-results/
+training_results.png
 
-# OS Files
+# --- IDE & System Files ---
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
-.directory
 
-# Temporary Files
-*.tmp
-*.bak
-*.log
+# --- Requirements & Configs ---
+# DO NOT ignore these; they are essential for reproducibility
+# !requirements.txt
+# !configs/
