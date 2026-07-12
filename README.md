@@ -170,9 +170,11 @@ Final Accuracy for RL_FineTuned: 499/500 (99.80%)
 
 ### View Results in MLflow
 
-Start the MLflow UI to visualize training metrics:
+Start the MLflow UI to visualize training metrics (using the SQLite backend for metrics):
 
-mlflow ui
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
 
 Navigate to [http://127.0.0.1:5000](http://127.0.0.1:5000) to explore:
 - Loss curves and reward progression

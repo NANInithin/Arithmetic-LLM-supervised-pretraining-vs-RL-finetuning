@@ -37,6 +37,12 @@ logs/
 # Exclude generated plots to keep the repo clean
 outputs/
 training_results.png
+results/
+plots/
+
+# --- v2 Architecture Directories ---
+# New directories for v2 checkpoint and artifact management
+checkpoints/
 
 # --- IDE & System Files ---
 .vscode/

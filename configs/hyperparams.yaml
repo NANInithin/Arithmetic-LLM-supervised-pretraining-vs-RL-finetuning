@@ -1,168 +1,199 @@
-# Hyperparameter Configuration Reference
-# This file documents all hyperparameters used in training
+# ============================================================================
+# V3 Architecture Hyperparameters - Scratchpad Chain-of-Thought (Corrected)
+# Performance fix: removed pad_to_length, reduced samples/epochs for efficiency
+# ============================================================================
 
 # ============================================================================
-# SUPERVISED PRETRAINING HYPERPARAMETERS
+# MODEL ARCHITECTURE
 # ============================================================================
-supervised_pretraining:
-  # Data Configuration
-  num_samples: 100000        # Total training examples
-  max_digits: 4              # Maximum operand size (1-4 digits)
-  operations: ['+', '-']     # Supported operations
+model:
+  # Core dimensions
+  embed_dim: 768
+  num_heads: 12
+  head_dim: 64
+  num_layers: 16
+  dim_feedforward: 3072
   
-  # Model Architecture
-  embed_dim: 192             # Embedding dimension
-  num_heads: 6               # Number of attention heads
-  num_layers: 6              # Number of transformer layers
-  max_len: 20                # Maximum sequence length
-  dropout: 0.1               # Dropout rate
-  vocab_size: 15             # [0-9, +, -, =, <EOS>, <PAD>]
+  # Sequence and vocabulary
+  max_len: 128                       # For scratchpad sequences
+  vocab_size: 21                      # 16 → 21 (added |, [, ], C, B)
   
-  # Training Configuration
-  batch_size: 512            # Batch size
-  learning_rate: 3e-4        # Initial learning rate (AdamW)
-  epochs: 20                 # Total training epochs
-  scheduler: "CosineAnnealingLR"
-  scheduler_t_max: 20        # Cosine annealing period
+  # Architectural choices
+  positional_encoding: "rope"
+  normalization: "rmsnorm"
+  ffn_activation: "swiglu"
+  dropout: 0.1
   
-  # Optimization
+  # Memory efficiency
+  use_mixed_precision: true
+  use_gradient_checkpointing: true
+
+# ============================================================================
+# SUPERVISED PRETRAINING (Corrected for performance)
+# ============================================================================
+training:
+  # Data configuration
+  num_samples: 150000               # CORRECTED: 500000 → 150000 (avg scratchpad ~45 tokens)
+  val_split: 0.05
+  max_digits_supervised: 4          # CORRECTED: 3 → 4 (5-digit deferred to v4)
+  use_scratchpad: true
+  
+  # Batch and sequence
+  batch_size: 64                    # Reduced for longer sequences
+  max_len: 128
+  
+  # Optimizer
   optimizer: "AdamW"
-  weight_decay: 0.01
-  betas: [0.9, 0.999]
-  eps: 1e-8
+  learning_rate: 3.0e-4
+  weight_decay: 0.1
+  beta1: 0.9
+  beta2: 0.95
+  eps: 1.0e-8
   
-  # Loss Function
+  # LR Schedule
+  lr_scheduler: "cosine_with_warmup"
+  warmup_steps: 400                 # CORRECTED: 500 → 400 (proportional to total steps)
+  min_lr: 3.0e-6
+  
+  # Training duration
+  epochs: 15                       # CORRECTED: 30 → 15 (each epoch has more meaningful tokens)
+  
+  # Early stopping
+  early_stopping:
+    enabled: true
+    patience: 5
+    min_delta: 1e-4
+  
+  # Loss
   criterion: "CrossEntropyLoss"
-  ignore_index: 14           # <PAD> token ID
+  ignore_index: 15                  # PAD token at index 15
   
-  # Early Stopping
-  early_stopping_loss: 0.05  # Stop if loss < threshold
+  # Gradient accumulation (CORRECTED: 4, not 6)
+  gradient_accumulation_steps: 4     # Effective batch = 64*4 = 256
 
 # ============================================================================
-# RL FINE-TUNING HYPERPARAMETERS
+# RL FINE-TUNING (Corrected curriculum)
 # ============================================================================
-rl_finetuning:
-  # Episode Configuration
-  total_episodes: 7000
-  batch_size: 128            # Gradient accumulation steps
+rl:
+  # Episodes (unchanged)
+  total_episodes: 10000
   
-  # Model Configuration
-  embed_dim: 192
-  num_heads: 6
-  num_layers: 6
-  max_len: 20
-  vocab_size: 15
+  # Batch
+  batch_size: 64
   
-  # RL Hyperparameters
-  learning_rate: 1e-5        # Lower than supervised (2x-10x smaller)
-  temperature: 1.0           # Sampling temperature (higher = more exploration)
-  entropy_coef: 0.01         # Entropy regularization coefficient
+  # Model
+  use_model_config: true
   
-  # Curriculum Learning
+  # Learning rate
+  learning_rate: 5.0e-6
+  
+  # Sampling
+  temperature: 1.0
+  temperature_end: 0.6              # Lower final temp
+  max_new_tokens: 40                # Scratchpad + answer
+  
+  # Entropy regularization
+  entropy_coef: 0.01
+  entropy_coef_end: 0.005
+  
+  # Gradient clipping
+  max_grad_norm: 1.0
+  
+  # Replay buffer (increased)
+  replay_buffer:
+    size: 2000
+    threshold: 0.99
+    sampling_prob: 0.25
+  
+  # Curriculum (CORRECTED: 2→3→4 digit only, no 5-digit)
   curriculum:
-    # Phase 1: 2-Digit Arithmetic
     phase1:
       start_episode: 1
       end_episode: 1200
       max_digits: 2
       
-    # Smooth Transition 1: 2→3 Digit
     mix1:
       start_episode: 1200
-      end_episode: 1700
-      duration: 500
+      end_episode: 2200                 # CORRECTED: 1000-ep transition
       from_max_digits: 2
       to_max_digits: 3
       
-    # Phase 2: 3-Digit Arithmetic
     phase2:
-      start_episode: 1700
-      end_episode: 3200
+      start_episode: 2200
+      end_episode: 3800
       max_digits: 3
       
-    # Smooth Transition 2: 3→4 Digit
     mix2:
-      start_episode: 3200
-      end_episode: 3700
-      duration: 500
+      start_episode: 3800
+      end_episode: 4800                 # CORRECTED: 1000-ep transition
       from_max_digits: 3
       to_max_digits: 4
       
-    # Phase 3: 4-Digit Arithmetic
     phase3:
-      start_episode: 3700
-      end_episode: 7000
+      start_episode: 4800
+      end_episode: 10000
       max_digits: 4
   
-  # Reward Configuration
-  reward:
-    correct_answer: 1.0        # Reward for exact match
-    correct_digit_count: 0.1   # Partial credit for digit count match
-    invalid_output: -0.1       # Penalty for gibberish/silence
-    
-  # Reward Baseline (Advantage Calculation)
-  baseline_smoothing: 0.05     # Exponential moving average factor
-  
-  # Prioritized Replay Buffer
-  replay_buffer:
-    size: 500                  # Maximum buffer size
-    threshold: 0.99            # Reward threshold for storing (reward < threshold)
-    sampling_prob: 0.25        # 25% chance to sample from buffer per episode
-  
-  # Generation
-  max_new_tokens: 9            # Maximum tokens to generate (for 5-digit answers)
-  
-  # Gradient Control
-  max_grad_norm: 1.0           # Gradient clipping threshold
-  
-  # Dataset Sizes
+  # Dataset sizes
   dataset_sizes:
-    easy: 10000                # 2-digit examples
-    medium: 10000              # 3-digit examples
-    hard: 20000                # 4-digit examples (larger for harder task)
+    easy: 15000
+    medium: 15000
+    hard: 30000
+  
+  # Reward configuration
+  reward:
+    correct_answer: 1.0
+    correct_digit_count: 0.1
+    invalid_output: -0.1
+    partial_credit_per_digit: 0.15
+    scratchpad_step_bonus: 0.2
+  
+  # Baseline
+  baseline_smoothing: 0.05
 
 # ============================================================================
-# EVALUATION HYPERPARAMETERS
+# EVALUATION
 # ============================================================================
 evaluation:
-  num_samples: 50             # Test on 50 examples
-  max_digits: 4               # Evaluate on hardest task
-  
-  print_first_n: 10           # Print first 10 predictions
+  num_samples: 500
+  max_digits: 4
+  print_first_n: 50
+  use_scratchpad: false
   
   models_to_evaluate:
-    - path: "pretrained_arithmetic.pth"
-      name: "Pretrained Model"
-    - path: "rl_arithmetic_replay.pth"
-      name: "RL Fine-Tuned Model"
+    - path: "checkpoints/pretrained_v3.pth"
+      name: "Pretrained Model (v3)"
+    - path: "checkpoints/rl_finetuned_v3.pth"
+      name: "RL Fine-Tuned Model (v3)"
 
 # ============================================================================
-# NOTES ON HYPERPARAMETER TUNING
+# PATHS AND ARTIFACTS
+# ============================================================================
+paths:
+  checkpoint_dir: "checkpoints"
+  results_dir: "results"
+  plots_dir: "plots"
+  logs_dir: "logs"
+  mlruns_dir: "mlruns"
+  
+  pretrained_model: "checkpoints/pretrained_v3.pth"
+  rl_model: "checkpoints/rl_finetuned_v3.pth"
+
+# ============================================================================
+# PERFORMANCE NOTES
 # ============================================================================
 # 
-# Learning Rate:
-#   - Supervised: 3e-4 is aggressive but safe with cosine annealing
-#   - RL: 1e-5 is intentionally small (2x smaller = prevents divergence)
-#   - Rule: RL_LR ≈ 1/10 * Supervised_LR
+# Original v3 design had issues:
+# - pad_to_length=128 forced all sequences to 128 tokens
+# - 500k samples at 128 tokens = 64M tokens/epoch with ~65% wasted on PAD
+# - Result: 2+ hr/epoch, ~70h total supervised
 #
-# Batch Size:
-#   - Supervised: 512 requires ~2GB GPU memory
-#   - RL: 128 is accumulation count (update every 128 episodes)
+# Corrected config:
+# - num_samples: 150k (avg scratchpad ~45 tokens → 6.75M tokens/epoch)
+# - epochs: 15 (more tokens per epoch, early stopping guards)
+# - warmup_steps: 400
+# - gradient_accumulation_steps: 4 (effective batch 256)
+# - max_digits_supervised: 4 (focus on 4-digit gap; 5-digit deferred to v4)
 #
-# Temperature:
-#   - 1.0: Balanced exploration vs. exploitation
-#   - > 1.0: More exploration (but slow convergence)
-#   - < 1.0: More exploitation (but mode collapse risk)
-#
-# Entropy Coefficient:
-#   - 0.01: Small enough not to dominate policy loss
-#   - Prevents model from always predicting same token
-#
-# Curriculum Smoothing:
-#   - 500-episode transitions prevent "cliff" collapse
-#   - Linear probability ramp: prob = (ep - start) / duration
-#
-# Replay Buffer:
-#   - threshold=0.99: Store when reward < 1.0 (all failures)
-#   - prob=0.25: 25% of training on replayed hard examples
-#   - size=500: Large enough to cover diverse failures
+# Expected performance: ~40-50 min/epoch, ~10-13h total supervised
+# 6.75M tokens/epoch is 1.5x v2's ~4.5M tokens, with richer supervision
