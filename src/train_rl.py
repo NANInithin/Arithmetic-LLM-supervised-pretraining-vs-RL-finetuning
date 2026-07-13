@@ -1,12 +1,12 @@
 """
-RL Fine-Tuning for Arithmetic LLM - v3 with Scratchpad CoT
+RL Fine-Tuning for Arithmetic LLM - v4 with Scratchpad CoT
 
 Features:
 - Config-driven hyperparameters from configs/hyperparams.yaml
 - Scratchpad step bonus in reward computation
-- Corrected curriculum: 2→3→4 digit (no 5-digit in v3)
+- 7-phase curriculum: 2→3→4→5 digit
 - Temperature and entropy coefficient scheduling
-- Replay buffer with 2000 capacity
+- Replay buffer with 4000 capacity
 - Mixed precision training (AMP)
 """
 
@@ -45,41 +45,57 @@ def get_correct_val(prompt_str):
     return 0
 
 
-def select_dataset(episode, ds_easy, ds_med, ds_hard):
-    """Select dataset based on 5-phase curriculum (v3: 2→3→4 digit only)."""
+def select_dataset(episode, ds_easy, ds_med, ds_hard, ds_very_hard):
+    """Select dataset based on 7-phase curriculum (v4: 2→3→4→5 digit)."""
     curriculum = CONFIG.rl.curriculum
-    
+
+    # curriculum maps phase-name -> CurriculumPhase dataclass (NOT a dict), so
+    # read its bounds via attributes. Helpers tolerate a missing phase.
+    def _end(phase_name):
+        phase = curriculum.get(phase_name)
+        return phase.end_episode if phase is not None else 0
+
+    def _mix_prob(phase_name):
+        phase = curriculum.get(phase_name)
+        if phase is None:
+            return 1.0
+        start, end = phase.start_episode, phase.end_episode
+        duration = max(1, end - start)
+        return min(1.0, (episode - start) / duration)
+
     # Phase 1: Easy (2-digit)
-    p1 = curriculum.get('phase1', {})
-    if episode <= p1.end_episode:
+    if episode <= _end('phase1'):
         return ds_easy, "Easy"
-    
-    # Mix 1: Easy → Medium (1000 episodes)
-    m1 = curriculum.get('mix1', {})
-    if episode <= m1.end_episode:
-        duration = m1.end_episode - m1.start_episode
-        prob = min(1.0, (episode - m1.start_episode) / duration)
+
+    # Mix 1: Easy → Medium
+    if episode <= _end('mix1'):
+        prob = _mix_prob('mix1')
         return (ds_med if np.random.rand() < prob else ds_easy), f"Mix E->M ({prob:.1f})"
-    
+
     # Phase 2: Medium (3-digit)
-    p2 = curriculum.get('phase2', {})
-    if episode <= p2.end_episode:
+    if episode <= _end('phase2'):
         return ds_med, "Medium"
-    
-    # Mix 2: Medium → Hard (1000 episodes)
-    m2 = curriculum.get('mix2', {})
-    if episode <= m2.end_episode:
-        duration = m2.end_episode - m2.start_episode
-        prob = min(1.0, (episode - m2.start_episode) / duration)
+
+    # Mix 2: Medium → Hard
+    if episode <= _end('mix2'):
+        prob = _mix_prob('mix2')
         return (ds_hard if np.random.rand() < prob else ds_med), f"Mix M->H ({prob:.1f})"
-    
+
     # Phase 3: Hard (4-digit)
-    p3 = curriculum.get('phase3', {})
-    if episode <= p3.end_episode:
+    if episode <= _end('phase3'):
         return ds_hard, "Hard"
-    
-    # Default: Hard
-    return ds_hard, "Hard"
+
+    # Mix 3: Hard → Very Hard
+    if episode <= _end('mix3'):
+        prob = _mix_prob('mix3')
+        return (ds_very_hard if np.random.rand() < prob else ds_hard), f"Mix H->VH ({prob:.1f})"
+
+    # Phase 4: Very Hard (5-digit)
+    if episode <= _end('phase4'):
+        return ds_very_hard, "Very Hard"
+
+    # Default: Very Hard
+    return ds_very_hard, "Very Hard"
 
 
 def get_scheduled_value(start_val, end_val, episode, total_episodes):
@@ -98,8 +114,8 @@ def train_rl():
     global CONFIG
     CONFIG = get_config()
     
-    mlflow.set_experiment("Arithmetic_LLM_Scaling_v3")
-    with mlflow.start_run(run_name="RL_Finetuning_v3_Scratchpad"):
+    mlflow.set_experiment("Arithmetic_LLM_Scaling_v4")
+    with mlflow.start_run(run_name="RL_Finetuning_v4_Scratchpad"):
         mlflow.log_params({
             "rl/learning_rate": CONFIG.rl.learning_rate,
             "rl/total_episodes": CONFIG.rl.total_episodes,
@@ -129,7 +145,10 @@ def train_rl():
             num_layers=CONFIG.model.num_layers,
             dim_feedforward=CONFIG.model.dim_feedforward,
             max_len=CONFIG.model.max_len,
-            dropout=CONFIG.model.dropout
+            dropout=CONFIG.model.dropout,
+            # Match supervised: honour the config flag (batch-1 RL uses trivial
+            # memory either way, and skipping recompute is marginally faster).
+            use_gradient_checkpointing=CONFIG.model.use_gradient_checkpointing,
         ).to(device)
         
         print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -150,31 +169,38 @@ def train_rl():
         optimizer = optim.AdamW(model.parameters(), lr=CONFIG.rl.learning_rate)
         model.train()
         
-        # Create datasets (CORRECTED: only 3 levels, no 5-digit)
+        # Create datasets (v4: 4 levels including 5-digit very_hard)
         ds_easy = ArithmeticDataset(
-            tokenizer, 
-            num_samples=CONFIG.rl.dataset_sizes["easy"], 
-            max_digits=2, 
+            tokenizer,
+            num_samples=CONFIG.rl.dataset_sizes.get("easy", 15000),
+            max_digits=2,
             reverse_target=False,
             use_scratchpad=True
         )
         ds_med = ArithmeticDataset(
-            tokenizer, 
-            num_samples=CONFIG.rl.dataset_sizes["medium"], 
-            max_digits=3, 
+            tokenizer,
+            num_samples=CONFIG.rl.dataset_sizes.get("medium", 15000),
+            max_digits=3,
             reverse_target=False,
             use_scratchpad=True
         )
         ds_hard = ArithmeticDataset(
-            tokenizer, 
-            num_samples=CONFIG.rl.dataset_sizes["hard"], 
-            max_digits=4, 
+            tokenizer,
+            num_samples=CONFIG.rl.dataset_sizes.get("hard", 30000),
+            max_digits=4,
+            reverse_target=False,
+            use_scratchpad=True
+        )
+        ds_very_hard = ArithmeticDataset(
+            tokenizer,
+            num_samples=CONFIG.rl.dataset_sizes.get("very_hard", 30000),
+            max_digits=5,
             reverse_target=False,
             use_scratchpad=True
         )
         
-        print(f"Datasets: Easy={len(ds_easy)}, Medium={len(ds_med)}, Hard={len(ds_hard)}")
-        print(f"Curriculum: 2→3→4 digit (no 5-digit in v3)")
+        print(f"Datasets: Easy={len(ds_easy)}, Medium={len(ds_med)}, Hard={len(ds_hard)}, Very Hard={len(ds_very_hard)}")
+        print(f"Curriculum: 2→3→4→5 digit (7 phases)")
         
         # Replay buffer (2000 for v3)
         hard_buffer = []
@@ -190,10 +216,11 @@ def train_rl():
         
         total_episodes = CONFIG.rl.total_episodes
         
-        print(f"\nStarting v3 RL training for {total_episodes} episodes...")
+        print(f"\nStarting v4 RL training for {total_episodes} episodes...")
         print(f"Temperature: {CONFIG.rl.temperature} → {CONFIG.rl.temperature_end}")
         print(f"Entropy coef: {CONFIG.rl.entropy_coef} → {CONFIG.rl.entropy_coef_end}")
         print(f"Max new tokens: {CONFIG.rl.max_new_tokens}")
+        print(f"Curriculum: 2→3→4→5 digit (7 phases)")
         print("-" * 70)
         
         for episode in range(1, total_episodes + 1):
@@ -211,8 +238,8 @@ def train_rl():
                 total_episodes
             )
             
-            # Select dataset based on 5-phase curriculum
-            ds, phase = select_dataset(episode, ds_easy, ds_med, ds_hard)
+            # Select dataset based on 7-phase curriculum
+            ds, phase = select_dataset(episode, ds_easy, ds_med, ds_hard, ds_very_hard)
             
             # Replay buffer sampling
             is_replay = False
@@ -331,7 +358,9 @@ def train_rl():
         os.makedirs(CONFIG.paths.checkpoint_dir, exist_ok=True)
         model_path = CONFIG.paths.rl_model
         torch.save(model.state_dict(), model_path)
-        mlflow.pytorch.log_model(model, "rl_model")
+        # NOTE: intentionally NOT calling mlflow.pytorch.log_model (version-fragile
+        # serialization; nothing loads via mlflow.pytorch). See train_supervised.
+        # The weights are still tracked in MLflow via log_artifact below.
         mlflow.log_artifact(model_path)
         
         print(f"\n✅ RL Training complete. Model saved to: {model_path}")

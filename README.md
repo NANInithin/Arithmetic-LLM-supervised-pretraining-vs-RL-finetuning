@@ -5,97 +5,65 @@
 [![MLflow](https://img.shields.io/badge/MLflow-2.0+-blue.svg)](https://mlflow.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A comprehensive PyTorch implementation comparing supervised pretraining and reinforcement learning fine-tuning approaches for teaching transformer models to perform multi-digit arithmetic operations. This project demonstrates the power of combining both paradigms to achieve **near-perfect accuracy** on complex arithmetic tasks including addition, subtraction, and multiplication with up to 4-digit operands.
+A comprehensive PyTorch implementation comparing supervised pretraining and reinforcement learning fine-tuning approaches for teaching transformer models to perform multi-digit arithmetic operations. This project demonstrates the power of combining both paradigms to achieve strong accuracy on complex arithmetic tasks including addition, subtraction, and multiplication with up to 5-digit operands.
 
-**Key Achievement:** Through scaled architecture (8-layer, 256-dim transformer), curriculum learning, dense reward shaping, and prioritized replay, the model achieves **99.80% accuracy** on 4-digit arithmetic after RL fine-tuning, up from 98.60% with supervised pretraining alone.
+**v4 Update:** The current architecture is a **~310M parameter decoder-only Transformer** trained with **scratchpad chain-of-thought** on **Modal A100-40GB GPUs**. It targets 5-digit arithmetic through a 7-phase curriculum. Local training is no longer recommended due to 8 GB VRAM constraints; use Modal cloud training instead.
 
 ---
 
-## 📊 Results Summary
+## 📊 Results Summary (v4 — Modal H100, 5-digit scratchpad CoT)
 
-| Metric | Pretrained Model | RL Fine-Tuned | Improvement |
-|--------|------------------|---------------|-------------|
-| **Overall Accuracy (500 test samples)** | **98.60%** (493/500) | **99.80%** (499/500) | ✅ **+1.2%** |
-| Training Time (NVIDIA GPU) | ~30 min (25 epochs) | ~20 min (7000 episodes) | Total: ~50 min |
-| Final Loss/Reward | 1.1567 | 0.9576 | Stable convergence |
+Final full-run results (500 random test samples per model). Full log in [`docs/run_details.md`](docs/run_details.md).
 
-**Key Achievement:** Through scaled architecture (8-layer, 256-dim transformer), curriculum learning with smooth transitions, dense reward shaping, and prioritized replay, the model improves from 98.60% to 99.80% accuracy on 4-digit arithmetic, eliminating most edge case errors.
+| Metric | Pretrained Model | RL Fine-Tuned |
+|--------|------------------|---------------|
+| **Overall Accuracy (500 samples)** | **95.00%** (475/500) | **94.60%** (473/500) |
+| 1–4 digit accuracy | **100%** | **100%** |
+| 5-digit accuracy | **99.30%** | **97.90%** |
+| Training | 20 epochs supervised | 15,000 RL episodes |
 
-### Training Progression
-- **Supervised Phase:** Loss decreases from 1.7057 (Epoch 1) → 1.1567 (Epoch 25)
-- **RL Phase:** Reward improves from 0.9941 (Episode 100) → 0.9576 (Episode 7000) with curriculum transitions at episodes 1200, 1700, 3200, 3700
+**Headline:** v4 fixes the catastrophic v3 collapse — from **4.00%** (v3) to **95.00%** overall, with **perfect 1–4 digit** and **~99% 5-digit** accuracy, decisively beating the v2 baseline (67.6%). This validates the v4 design: fixed train/inference mismatch (evaluate *with* scratchpad), 2× model capacity (~310M), and a full 5-digit curriculum.
 
-## 📈 Results Visualization
+**RL finding (deferred to v5):** On v4, RL fine-tuning did **not** improve over supervised pretraining (95.00% → 94.60%); multiplication regressed slightly (89.9% → 88.6%). With the supervised model already at ~95%, REINFORCE added policy-gradient noise without meaningful headroom. Investigating/redesigning RL is a v5 item.
 
-### Training Metrics from MLflow
+> ⚠️ **Sampling variance:** the eval set is regenerated randomly each run (~±2% on 500 samples). Example: the pretrained model read 97.4% in one run and 95.0% in another with identical weights. Small deltas (like the pretrained-vs-RL gap) are within noise — a fixed/seeded eval set is a future improvement.
 
-The following visualizations demonstrate the model's learning progression across both training phases, captured from actual MLflow UI:
+### Accuracy by digit complexity (final v4 run)
 
-#### Supervised Pretraining Loss
+| Digits | Pretrained | RL Fine-Tuned |
+|--------|-----------|---------------|
+| 1-digit | 100% | 100% |
+| 2-digit | 100% | 100% |
+| 3-digit | 100% | 100% |
+| 4-digit | 100% | 100% |
+| 5-digit | 99.30% | 97.90% |
+| 6-digit \* | 33.3% | 23.8% |
+| 7–8 digit \* | 0–11% | 0–11% |
 
-![Supervised Loss](loss.png)
+\* 6+ digit is **beyond the 5-digit training curriculum** — pure length extrapolation, not a target.
 
-*Supervised training loss curve showing stable convergence from 1.7057 (Epoch 1) to 1.1567 (Epoch 25). The smooth descent indicates effective learning of arithmetic patterns with reverse digit ordering.*
+### Accuracy by operation (final v4 run)
 
-#### RL Fine-Tuning Metrics
+| Operation | Pretrained | RL Fine-Tuned |
+|-----------|-----------|---------------|
+| Addition (+) | 95.7% | 95.8% |
+| Subtraction (−) | 100% | 100% |
+| Multiplication (×) | 89.9% | 88.6% |
 
-**Episode Reward:**
+**Key insight:** subtraction is solved (100%); multiplication is the hardest operation (longest scratchpads) and the main source of remaining error. Supervised pretraining alone essentially solves the in-distribution (≤5-digit) task.
 
-![Episode Reward](episode_reward.png)
+### Sample predictions (final v4 run, with scratchpad → answer)
 
-*Episode-by-episode reward progression across all 7000 training episodes. Frequent spikes to 1.0 demonstrate successful correct predictions throughout all curriculum phases (Easy → Medium → Hard transitions visible at episodes 1200, 1700, 3200, 3700).*
+```
+34938-6553=  → 28385   ✅   (5-digit subtraction)
+7588+41794=  → 49382   ✅   (5-digit addition)
+71*45=       → 3195    ✅   (multiplication)
+2650-2622=   → 0028→28 ✅   (leading zeros handled)
+5356*16=     → 85696   ✅
+717*5391=    → 6       ❌   (large × large — truncated/hard)
+```
 
-**Running Reward:**
-
-![Running Reward](running_reward.png)
-
-*Exponentially smoothed running reward (α=0.05) showing steady improvement from initial values to sustained 0.95-1.0 range. The smooth progression indicates effective curriculum learning without catastrophic forgetting during difficulty transitions.*
-
-**Batch Loss:**
-
-![Batch Loss](batch_loss.png)
-
-*Policy gradient batch loss (gradient accumulation over 128 episodes) stabilizing around -0.05 to -0.15 after initial adjustment period. Negative values reflect positive advantages from baseline subtraction, indicating consistent policy improvement.*
-
-#### Final Evaluation Accuracy
-
-**Pretrained Model:**
-
-![Pretrained Accuracy](Pretrained_accuracy.png)
-
-*The supervised pretrained model achieves **98.60% accuracy** (493/500 correct) on the 4-digit arithmetic test set, demonstrating that reverse digit generation and scaled architecture provide a strong foundation.*
-
-**RL Fine-Tuned Model:**
-
-![RL Fine-Tuned Accuracy](RL_FineTuned_accuracy.png)
-
-*After RL fine-tuning with curriculum learning and prioritized replay, the model achieves **99.80% accuracy** (499/500 correct), successfully addressing edge cases that remained after supervised pretraining.*
-
-### Sample Predictions from Evaluation
-
-**Pretrained Model Examples:**
-682+4=       | 686        | ✅
-6796-835=    | 5961       | ✅
-75*29=       | 2175       | ✅
-99*72=       | 7128       | ✅
-58*97=       | 5626       | ✅
-
-**RL Fine-Tuned Model Examples:**
-9935-9895=   | 40         | ✅
-6359+362=    | 6721       | ✅
-9133-3193=   | 5940       | ✅
-71*77=       | 5467       | ✅
-3823-666=    | 3157       | ✅
-
-### Performance Breakdown
-
-| Operation Type | Test Examples | Accuracy |
-|----------------|---------------|----------|
-| Addition | Mixed digits | ~99.8% |
-| Subtraction | Mixed digits | ~99.8% |
-| Multiplication | Up to 2-digit × 2-digit | ~99.8% |
-
-**Key Insight:** The RL fine-tuned model achieves near-perfect accuracy across all operation types, with only 1 error out of 500 test cases (99.80%). The remaining edge cases represent extremely challenging arithmetic problems that would benefit from chain-of-thought reasoning.
+> **Note on images:** the PNGs previously embedded here (`loss.png`, `episode_reward.png`, `Pretrained_accuracy.png`, etc.) are from an earlier (v2-era) run and do **not** reflect these v4 numbers. For live v4 metrics use MLflow (`mlflow ui --backend-store-uri sqlite:///mlflow.db`).
 
 ---
 
@@ -128,45 +96,49 @@ pip install -r requirements.txt
 # 4. Install package in development mode
 pip install -e .
 
-### Run Complete Pipeline
+### Run Complete Pipeline (Local — for testing only)
 
 Execute the entire training and evaluation pipeline with a single command:
 
 python run_pipeline.py
 
-**Expected Output:**
-Cleaning local workspace...
-✅ Logged configs/hyperparams.yaml to MLflow.
-✅ Logged requirements.txt to MLflow.
-
->>> STARTING: Supervised Pretraining (Reverse Mode)
-Epoch 1: Loss 1.7057
-Epoch 2: Loss 1.3075
-...
-Epoch 25: Loss 1.1567
-
->>> STARTING: RL Fine-Tuning (Curriculum & Replay)
-✅ Loaded model weights.
-100    | Easy     | Rw: 0.9941 | 1*5= 5
-...
-7000   | Hard     | Rw: 0.9576 | 60+0= 06
-RL Training Complete. Model and metrics logged to MLflow.
-
->>> STARTING: Final Model Evaluation
-Final Accuracy for Pretrained: 493/500 (98.60%)
-Final Accuracy for RL_FineTuned: 499/500 (99.80%)
-
-==================================================
-[PIPELINE COMPLETE SUCCESS]
-==================================================
+**Note:** The v4 model (~310M params) requires ~12-16 GB VRAM during training. Local runs on an RTX 4060 8 GB will OOM. For full v4 training, use Modal (see below).
 
 **Pipeline Stages:**
 1. **Cleanup:** Removes old local log files (`supervised_loss.npy`, `rl_rewards_replay.npy`)
 2. **Metadata Logging:** Logs `configs/hyperparams.yaml` and `requirements.txt` to MLflow
-3. **Supervised Pretraining:** 25 epochs (~30 minutes on GPU)
-4. **RL Fine-Tuning:** 7000 episodes with curriculum progression (~20 minutes on GPU)
-5. **Evaluation:** Tests both models on 500 random 4-digit arithmetic problems
+3. **Supervised Pretraining:** 20 epochs on 300k samples
+4. **RL Fine-Tuning:** 15,000 episodes with 7-phase 2→3→4→5 curriculum
+5. **Evaluation:** Tests both models on 500 random 5-digit arithmetic problems with scratchpad decoding
 6. **Results:** Displays accuracy metrics and MLflow tracking URL
+
+Run individual stages:
+
+python run_pipeline.py --stage supervised
+python run_pipeline.py --stage rl
+python run_pipeline.py --stage eval
+
+### Run on Modal Cloud (Recommended for v4)
+
+1. Install Modal and authenticate:
+   ```bash
+   pip install modal
+   modal setup
+   ```
+
+2. Run the full pipeline on A100-40GB:
+   ```bash
+   modal run modal_train.py
+   ```
+
+3. Run a specific stage:
+   ```bash
+   modal run modal_train.py --stage supervised
+   modal run modal_train.py --stage rl
+   modal run modal_train.py --stage eval
+   ```
+
+Checkpoints are persisted to the `arithmetic-llm-checkpoints` Modal Volume and mounted at `/checkpoints`.
 
 ### View Results in MLflow
 
@@ -204,7 +176,8 @@ Arithmetic-LLM-supervised-pretraining-vs-RL-finetuning/
 ├── configs/                       # Configuration files
 │   └── hyperparams.yaml           # Complete hyperparameter documentation
 │
-├── run_pipeline.py                # Master orchestration script
+├── run_pipeline.py                # Master orchestration script (local + Modal)
+├── modal_train.py                 # Modal cloud training wrapper
 ├── setup.py                       # Package installation configuration
 ├── requirements.txt               # Python dependencies
 │

@@ -40,6 +40,14 @@ training_results.png
 results/
 plots/
 
+# --- Agent data ---
+docs/
+
+# --- Modal Cloud Artifacts ---
+# Local Modal caches and state
+.modal/
+*.modal
+
 # --- v2 Architecture Directories ---
 # New directories for v2 checkpoint and artifact management
 checkpoints/

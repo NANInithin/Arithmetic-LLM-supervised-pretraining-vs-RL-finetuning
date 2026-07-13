@@ -1,5 +1,5 @@
 """
-ArithTransformer - v2 Architecture
+ArithTransformer - v4 Architecture
 
 A decoder-only Transformer with:
 - RoPE (Rotary Position Embedding) for better length generalization
@@ -7,7 +7,7 @@ A decoder-only Transformer with:
 - SwiGLU FFN activation (better gradient flow)
 - Mixed precision and gradient checkpointing support
 
-Parameter count: ~151M (embed=768, layers=16, heads=12, head_dim=64)
+Parameter count: ~310M (embed=896, layers=24, heads=14, head_dim=64)
 """
 
 import math
@@ -305,7 +305,7 @@ class DecoderBlock(nn.Module):
 
 class ArithTransformer(nn.Module):
     """
-    Arithmetic Transformer for v2 Architecture.
+    Arithmetic Transformer for v4 Architecture.
     
     A decoder-only Transformer with:
     - Token embedding (no positional embedding - uses RoPE)
@@ -313,17 +313,17 @@ class ArithTransformer(nn.Module):
     - Final RMSNorm
     - LM head (tied to token embeddings)
     
-    Parameter count: ~151M
-    VRAM (bs=96): ~3.5 GB (with AMP + gradient checkpointing)
+    Parameter count: ~310M
+    VRAM (bs=128, seq=256): ~12-16 GB (with AMP + gradient checkpointing)
     """
     def __init__(
         self, 
         vocab_size: int, 
-        embed_dim: int = 768, 
-        num_heads: int = 12, 
-        num_layers: int = 16,
-        dim_feedforward: int = 3072,
-        max_len: int = 64, 
+        embed_dim: int = 896, 
+        num_heads: int = 14, 
+        num_layers: int = 24,
+        dim_feedforward: int = 3584,
+        max_len: int = 256, 
         dropout: float = 0.1,
         use_gradient_checkpointing: bool = True,
         tie_weights: bool = True
@@ -419,12 +419,13 @@ class ArithTransformer(nn.Module):
     @torch.no_grad()
     def generate(self, prompt_ids: list, max_new_tokens: int = 10, temperature: float = 1.0, eos_token_id: int = None) -> list:
         """
-        Autoregressive generation with sampling.
+        Autoregressive generation with sampling or greedy decoding.
         
         Args:
             prompt_ids: List of input token IDs
             max_new_tokens: Maximum number of new tokens to generate
-            temperature: Sampling temperature (higher = more random)
+            temperature: Sampling temperature (higher = more random).
+                         temperature=0.0 triggers greedy argmax decoding.
             eos_token_id: Optional EOS token ID to stop generation
             
         Returns:
@@ -443,11 +444,15 @@ class ArithTransformer(nn.Module):
             logits, _ = self(idx_cond)
             
             # Get last token logits
-            logits = logits[:, -1, :] / temperature
+            logits = logits[:, -1, :]
             
-            # Sample from distribution
-            probs = F.softmax(logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
+            # Greedy decoding when temperature is 0 (or very close to 0)
+            if temperature == 0.0:
+                next_token = torch.argmax(logits, dim=-1, keepdim=True)
+            else:
+                logits = logits / temperature
+                probs = F.softmax(logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
             
             # Append to sequence
             idx = torch.cat([idx, next_token], dim=1)
@@ -464,7 +469,7 @@ def count_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
-def create_model(vocab_size: int = 16, config: dict = None) -> ArithTransformer:
+def create_model(vocab_size: int = 21, config: dict = None) -> ArithTransformer:
     """
     Create an ArithTransformer model.
     
@@ -477,22 +482,22 @@ def create_model(vocab_size: int = 16, config: dict = None) -> ArithTransformer:
     """
     if config is None:
         config = {
-            'embed_dim': 768,
-            'num_heads': 12,
-            'num_layers': 16,
-            'dim_feedforward': 3072,
-            'max_len': 64,
+            'embed_dim': 896,
+            'num_heads': 14,
+            'num_layers': 24,
+            'dim_feedforward': 3584,
+            'max_len': 256,
             'dropout': 0.1,
             'use_gradient_checkpointing': True
         }
     
     return ArithTransformer(
         vocab_size=vocab_size,
-        embed_dim=config.get('embed_dim', 768),
-        num_heads=config.get('num_heads', 12),
-        num_layers=config.get('num_layers', 16),
-        dim_feedforward=config.get('dim_feedforward', 3072),
-        max_len=config.get('max_len', 64),
+        embed_dim=config.get('embed_dim', 896),
+        num_heads=config.get('num_heads', 14),
+        num_layers=config.get('num_layers', 24),
+        dim_feedforward=config.get('dim_feedforward', 3584),
+        max_len=config.get('max_len', 256),
         dropout=config.get('dropout', 0.1),
         use_gradient_checkpointing=config.get('use_gradient_checkpointing', True)
     )
@@ -556,33 +561,33 @@ class MiniTransformer(nn.Module):
 
 if __name__ == "__main__":
     # Quick test of the model
-    print("Testing ArithTransformer v2...")
+    print("Testing ArithTransformer v4...")
     
     model = ArithTransformer(
-        vocab_size=16,
-        embed_dim=768,
-        num_heads=12,
-        num_layers=16,
-        dim_feedforward=3072,
-        max_len=64
+        vocab_size=21,
+        embed_dim=896,
+        num_heads=14,
+        num_layers=24,
+        dim_feedforward=3584,
+        max_len=256
     )
     
     total_params = count_parameters(model)
     print(f"Model parameters: {total_params:,}")
-    print(f"Expected ~151M, got {total_params/1e6:.2f}M")
+    print(f"Expected ~310M, got {total_params/1e6:.2f}M")
     
     # Test forward pass
     batch_size, seq_len = 2, 32
-    x = torch.randint(0, 16, (batch_size, seq_len))
-    targets = torch.randint(0, 16, (batch_size, seq_len))
+    x = torch.randint(0, 21, (batch_size, seq_len))
+    targets = torch.randint(0, 21, (batch_size, seq_len))
     
     logits, loss = model(x, targets)
     print(f"Output shape: {logits.shape}")  # [batch, seq_len, vocab_size]
     print(f"Loss: {loss.item():.4f}")
     
-    # Test generation
+    # Test generation (greedy)
     prompt = [1, 2, 3, 4, 5]  # Simple prompt
-    generated = model.generate(prompt, max_new_tokens=5, eos_token_id=14)
+    generated = model.generate(prompt, max_new_tokens=5, eos_token_id=14, temperature=0.0)
     print(f"Generated tokens: {generated[:10]}")
     
     print("\n✅ Model test passed!")

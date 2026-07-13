@@ -1,11 +1,12 @@
 """
-Evaluation for Arithmetic LLM - v3 with Scratchpad CoT
+Evaluation for Arithmetic LLM - v4 with Scratchpad CoT
 
 Features:
 - Config-driven hyperparameters from configs/hyperparams.yaml
 - Evaluates both pretrained and RL-finetuned models
-- Uses ArithTransformer (v3 architecture with vocab_size=21)
-- Evaluates WITHOUT scratchpad (direct answer generation for fair assessment)
+- Uses ArithTransformer (v4 architecture with vocab_size=21)
+- Evaluates WITH scratchpad to match training (extracts answer after '|')
+- Greedy decoding (temperature=0.0) for deterministic evaluation
 """
 
 import os
@@ -22,8 +23,9 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
     """
     Evaluate a single model.
     
-    Evaluation is done WITHOUT scratchpad - the model generates answers directly.
-    This tests whether the learned scratchpad reasoning generalizes to direct answers.
+    Evaluation is done WITH scratchpad (matching training) and extracts the final
+    answer after the last '|' delimiter. Greedy decoding is used for reproducible,
+    deterministic results.
     
     Args:
         model_path: Path to model weights
@@ -34,7 +36,7 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
     """
     CONFIG = get_config()
     
-    # Sanitize name for MLflow
+    # Sanitize name for MLflow (no parentheses, spaces, or hyphens)
     safe_name = name.replace('(', '').replace(')', '').replace(' ', '_').replace('-', '_')
     
     print(f"\n{'='*60}")
@@ -51,7 +53,7 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
     if print_first_n is None:
         print_first_n = CONFIG.evaluation.print_first_n
     
-    # Initialize model (v3 with vocab_size=21, max_len=128)
+    # Initialize model (v4 architecture)
     model = ArithTransformer(
         vocab_size=tokenizer.vocab_size,
         embed_dim=CONFIG.model.embed_dim,
@@ -71,13 +73,13 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
         print(f"❌ Error loading model from {model_path}: {e}")
         return None
     
-    # Create evaluation dataset (WITHOUT scratchpad - direct answer)
+    # Create evaluation dataset WITH scratchpad (matches training distribution)
     ds = ArithmeticDataset(
         tokenizer, 
         num_samples=num_samples, 
         max_digits=max_digits, 
         reverse_target=False,  # Forward answer (not reverse)
-        use_scratchpad=False   # No scratchpad for evaluation
+        use_scratchpad=True    # Match training mode
     )
     
     # Counters
@@ -88,6 +90,10 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
     digit_correct = {}
     digit_total = {}
     
+    # Per-operation accuracy tracking
+    op_correct = {}
+    op_total = {}
+    
     print(f"\nRunning evaluation on {num_samples} samples (up to {max_digits}-digit)...")
     print(f"{'Prompt':<15} | {'Prediction':<12} | {'Target':<12} | Status")
     print("-" * 60)
@@ -96,55 +102,47 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
         item = ds[i]
         prompt = item['prompt_str']
         
-        # Calculate ground truth
+        # Calculate ground truth and identify operation
         clean_p = prompt.replace('=', '')
         if '+' in clean_p:
-            val = int(clean_p.split('+')[0]) + int(clean_p.split('+')[1])
+            parts = clean_p.split('+')
+            val = int(parts[0]) + int(parts[1])
+            op = '+'
+            operand = parts[0]
         elif '-' in clean_p:
             parts = clean_p.split('-')
             val = int(parts[0]) - int(parts[1])
+            op = '-'
+            operand = parts[0]
         elif '*' in clean_p:
             parts = clean_p.split('*')
             val = int(parts[0]) * int(parts[1])
+            op = '*'
+            operand = parts[0]
         else:
             continue
         
-        # Determine digit complexity
-        if '*-' in clean_p:
-            op = '*'
-            operand = clean_p.split('*')[0]
-        elif '+' in clean_p:
-            op = '+'
-            operand = clean_p.split('+')[0]
-        elif '-' in clean_p:
-            op = '-'
-            operand = clean_p.split('-')[0]
-        else:
-            op = '*'
-            operand = clean_p.split('*')[0]
-        
         num_digits = max(len(operand), len(str(abs(val))))
         
-        # Generate prediction (no scratchpad - direct)
+        # Generate prediction with scratchpad (greedy, stop at EOS)
         input_ids = item['prompt_ids'].to(device).unsqueeze(0)
         
         with torch.no_grad():
             gen_ids = model.generate(
                 input_ids.tolist()[0], 
-                max_new_tokens=CONFIG.rl.max_new_tokens
+                max_new_tokens=CONFIG.rl.max_new_tokens,
+                temperature=0.0,                       # Greedy decoding for deterministic eval
+                eos_token_id=tokenizer.eos_token_id    # Stop at EOS
             )
         
         pred_raw = tokenizer.decode(gen_ids)
         
-        # Extract answer
-        if '=' in pred_raw:
-            pred_ans = pred_raw.split('=')[-1].strip()
+        # Extract final answer: everything after the last '|'
+        if '|' in pred_raw:
+            pred_ans = pred_raw.split('|')[-1].strip()
         else:
-            pred_ans = pred_raw.strip()
-            
-        # If scratchpad was used, answer is after the last '|'
-        if '|' in pred_ans:
-            pred_ans = pred_ans.split('|')[-1].strip()
+            # Fallback: extract after '=' if no scratchpad delimiter
+            pred_ans = pred_raw.split('=')[-1].strip()
             
         pred_clean = "".join([c for c in pred_ans if c.isdigit() or c == '-'])
         
@@ -163,6 +161,11 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
         digit_total[num_digits] = digit_total.get(num_digits, 0) + 1
         if is_correct:
             digit_correct[num_digits] = digit_correct.get(num_digits, 0) + 1
+        
+        # Track per-operation accuracy
+        op_total[op] = op_total.get(op, 0) + 1
+        if is_correct:
+            op_correct[op] = op_correct.get(op, 0) + 1
         
         # Print first N examples
         if i < print_first_n:
@@ -183,12 +186,26 @@ def evaluate_model(model_path, name, max_digits=5, num_samples=None, print_first
             digit_acc = digit_correct.get(digits, 0) / digit_total[digits]
             print(f"   {digits}-digit: {digit_correct.get(digits, 0)}/{digit_total[digits]} ({digit_acc*100:.2f}%)")
     
+    # Print per-operation breakdown
+    print(f"\n🔢 Accuracy by operation:")
+    for op in sorted(op_total.keys()):
+        if op_total[op] > 0:
+            op_acc = op_correct.get(op, 0) / op_total[op]
+            print(f"   {op}: {op_correct.get(op, 0)}/{op_total[op]} ({op_acc*100:.2f}%)")
+    
     # Log to MLflow
     mlflow.log_metric(f"{safe_name}_overall_accuracy", accuracy)
     for digits in sorted(digit_total.keys()):
         if digit_total[digits] > 0:
             digit_acc = digit_correct.get(digits, 0) / digit_total[digits]
             mlflow.log_metric(f"{safe_name}_{digits}digit_accuracy", digit_acc)
+    # MLflow metric names may not contain '+' or '*', so map the operation
+    # symbols to words before logging (dashes are allowed, but map for clarity).
+    op_names = {'+': 'add', '-': 'sub', '*': 'mul'}
+    for op in sorted(op_total.keys()):
+        if op_total[op] > 0:
+            op_acc = op_correct.get(op, 0) / op_total[op]
+            mlflow.log_metric(f"{safe_name}_{op_names.get(op, op)}_accuracy", op_acc)
     
     return accuracy
 
@@ -197,8 +214,8 @@ def evaluate_all():
     """Evaluate all configured models."""
     CONFIG = get_config()
     
-    mlflow.set_experiment("Arithmetic_LLM_Scaling_v3")
-    with mlflow.start_run(run_name="Evaluation_v3"):
+    mlflow.set_experiment("Arithmetic_LLM_Scaling_v4")
+    with mlflow.start_run(run_name="Evaluation_v4"):
         # Log evaluation config
         mlflow.log_params({
             "eval/num_samples": CONFIG.evaluation.num_samples,
@@ -211,12 +228,22 @@ def evaluate_all():
         })
         
         results = {}
-        
+
+        # On Modal, checkpoints live on the mounted volume (/checkpoints), but the
+        # models_to_evaluate paths in the YAML are relative ("checkpoints/..."),
+        # which don't exist inside the container. Redirect by basename when
+        # ARITH_LLM_CHECKPOINT_DIR is set — mirrors the redirect in config.py so
+        # eval actually finds the models instead of silently reporting nothing.
+        modal_ckpt_dir = os.environ.get("ARITH_LLM_CHECKPOINT_DIR")
+
         # Evaluate each configured model
         for model_info in CONFIG.evaluation.models_to_evaluate:
             model_path = model_info.get("path", "")
             name = model_info.get("name", "Model")
-            
+
+            if modal_ckpt_dir:
+                model_path = os.path.join(modal_ckpt_dir, os.path.basename(model_path))
+
             if os.path.exists(model_path):
                 acc = evaluate_model(
                     model_path, 

@@ -18,19 +18,54 @@ pip install -r requirements.txt
 ```
 
 ### 3. Run Everything
+
+**Recommended for v4 (Modal cloud A100-40GB):**
 ```bash
-# Pretraining (30 min)
-python src/train_supervised.py
+# Full pipeline (~1.5h, ~$3.29)
+modal run modal_train.py
 
-# RL Fine-tuning (2-3 hours)
-python src/train_rl.py
-
-# Evaluate
-python src/evaluate.py
-
-# Visualize
-python src/plot.py
+# Individual stages
+modal run modal_train.py --stage supervised
+modal run modal_train.py --stage rl
+modal run modal_train.py --stage eval
 ```
+
+**Local testing only (v4 will OOM on 8GB VRAM):**
+```bash
+# Full pipeline
+python run_pipeline.py
+
+# Individual stages
+python run_pipeline.py --stage supervised
+python run_pipeline.py --stage rl
+python run_pipeline.py --stage eval
+```
+
+> **Note:** The v4 model (~310M parameters) is designed for Modal A100-40GB cloud GPUs. Local training on 8 GB VRAM will fail with OOM. Use `modal run modal_train.py` for full training.
+
+---
+
+## ☁️ Modal Cloud Setup (Recommended)
+
+If you are training the v4 model, use Modal:
+
+```bash
+# 1. Install Modal
+pip install modal
+
+# 2. Authenticate (creates/modal token)
+modal setup
+
+# 3. Run the full pipeline on A100-40GB
+modal run modal_train.py
+
+# 4. Run individual stages
+modal run modal_train.py --stage supervised
+modal run modal_train.py --stage rl
+modal run modal_train.py --stage eval
+```
+
+Checkpoints are saved to the `arithmetic-llm-checkpoints` Modal Volume (`/checkpoints` inside the container).
 
 ---
 
@@ -60,15 +95,21 @@ python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
 ---
 
 ### Step 2: Run Supervised Pretraining
+
+**Modal (recommended for v4):**
 ```bash
-python src/train_supervised.py
+modal run modal_train.py --stage supervised
+```
+
+**Local:**
+```bash
+python run_pipeline.py --stage supervised
 ```
 
 **What happens:**
-- Generates 100,000 random arithmetic examples (2-4 digit)
-- Trains for 20 epochs with cosine annealing
-- Saves model to `pretrained_arithmetic.pth`
-- Saves loss history to `supervised_loss.npy`
+- Generates 300,000 random arithmetic examples (2-5 digit) with scratchpad CoT
+- Trains for 20 epochs with cosine warmup
+- Saves model to `checkpoints/pretrained_v4.pth`
 
 **Expected output:**
 ```
@@ -86,15 +127,21 @@ Training loss history saved.
 ---
 
 ### Step 3: Run RL Fine-Tuning
+
+**Modal (recommended for v4):**
 ```bash
-python src/train_rl.py
+modal run modal_train.py --stage rl
+```
+
+**Local:**
+```bash
+python run_pipeline.py --stage rl
 ```
 
 **What happens:**
 - Loads pretrained model from Step 2
-- Runs 7000 RL training episodes with curriculum
-- Saves RL model to `rl_arithmetic_replay.pth`
-- Saves reward history to `rl_rewards_replay.npy`
+- Runs 15,000 RL training episodes with 7-phase 2→3→4→5 curriculum
+- Saves RL model to `checkpoints/rl_finetuned_v4.pth`
 
 **Expected output:**
 ```
@@ -113,14 +160,21 @@ RL Training Complete.
 ---
 
 ### Step 4: Evaluate Models
+
+**Modal (recommended for v4):**
 ```bash
-python src/evaluate.py
+modal run modal_train.py --stage eval
+```
+
+**Local:**
+```bash
+python run_pipeline.py --stage eval
 ```
 
 **What happens:**
-- Tests both models (pretrained and RL) on 50 random 4-digit problems
-- Prints accuracy metrics
-- Shows example predictions
+- Tests both models (pretrained and RL) on 500 random 5-digit problems
+- Evaluates WITH scratchpad and extracts answer after `|`
+- Prints overall, per-digit, and per-operation accuracy metrics
 
 **Expected output:**
 ```

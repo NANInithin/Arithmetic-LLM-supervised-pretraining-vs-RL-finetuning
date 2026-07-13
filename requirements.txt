@@ -5,3 +5,4 @@ matplotlib>=3.7.0
 PyYAML>=6.0
 tqdm>=4.65.0
 mlflow>=2.0.0
+modal>=0.63.0

@@ -1,5 +1,5 @@
 """
-Supervised Pretraining for Arithmetic LLM - v3 with Scratchpad CoT
+Supervised Pretraining for Arithmetic LLM - v4 with Scratchpad CoT
 
 Features:
 - Config-driven hyperparameters from configs/hyperparams.yaml
@@ -24,6 +24,35 @@ from torch.nn.utils.rnn import pad_sequence
 from src.config import get_config
 from src.dataset import ArithmeticTokenizer, ArithmeticDataset, compute_scratchpad_reward
 from src.model import ArithTransformer
+
+
+class PadCollate:
+    """Picklable collate_fn that dynamically pads a batch to its longest seq.
+
+    Defined at module level (not a lambda) so it can be pickled by DataLoader
+    worker processes — required for num_workers > 0 on Windows (spawn) and Modal.
+    """
+    def __init__(self, pad_token_id):
+        self.pad_token_id = pad_token_id
+
+    def __call__(self, batch):
+        return pad_sequence(
+            [item['input_ids'] for item in batch],
+            batch_first=True,
+            padding_value=self.pad_token_id,
+        )
+
+
+def _seed_worker(worker_id):
+    """Give each DataLoader worker a distinct Python RNG seed.
+
+    The dataset generates samples on the fly with the `random` module. Without
+    this, all workers would inherit the same seed and produce duplicate data.
+    torch derives a distinct base seed per worker, which we forward to `random`.
+    """
+    import random
+    seed = torch.initial_seed() % (2 ** 32)
+    random.seed(seed)
 
 
 class CosineWarmupScheduler:
@@ -80,8 +109,8 @@ class EarlyStopping:
 def train_supervised():
     CONFIG = get_config()
     
-    mlflow.set_experiment("Arithmetic_LLM_Scaling_v3")
-    with mlflow.start_run(run_name="Supervised_Pretraining_v3_Scratchpad"):
+    mlflow.set_experiment("Arithmetic_LLM_Scaling_v4")
+    with mlflow.start_run(run_name="Supervised_Pretraining_v4_Scratchpad"):
         mlflow.log_params({
             "embed_dim": CONFIG.model.embed_dim,
             "num_heads": CONFIG.model.num_heads,
@@ -131,26 +160,31 @@ def train_supervised():
         mlflow.log_param("train_samples", train_size)
         mlflow.log_param("val_samples", val_size)
         
-        # Create data loaders with dynamic padding via collate_fn
+        # Create data loaders with dynamic padding via collate_fn.
+        # Parallel workers overlap the on-the-fly sample generation/tokenization
+        # with GPU compute, so the A100 isn't starved waiting for batches.
+        # persistent_workers keeps them alive across epochs (avoids re-spawn cost).
+        num_workers = min(8, os.cpu_count() or 1)
+        collate = PadCollate(tokenizer.pad_token_id)
+        loader_kwargs = dict(
+            num_workers=num_workers,
+            pin_memory=torch.cuda.is_available(),
+            persistent_workers=num_workers > 0,
+            worker_init_fn=_seed_worker if num_workers > 0 else None,
+        )
         train_loader = DataLoader(
-            train_ds, 
-            batch_size=CONFIG.training.batch_size, 
+            train_ds,
+            batch_size=CONFIG.training.batch_size,
             shuffle=True,
-            collate_fn=lambda b: pad_sequence(
-                [i['input_ids'] for i in b], 
-                batch_first=True, 
-                padding_value=tokenizer.pad_token_id
-            )
+            collate_fn=collate,
+            **loader_kwargs,
         )
         val_loader = DataLoader(
             val_ds,
             batch_size=CONFIG.training.batch_size,
             shuffle=False,
-            collate_fn=lambda b: pad_sequence(
-                [i['input_ids'] for i in b],
-                batch_first=True,
-                padding_value=tokenizer.pad_token_id
-            )
+            collate_fn=collate,
+            **loader_kwargs,
         )
         
         # Initialize model (v3 with vocab_size=21, max_len=128)
@@ -161,7 +195,13 @@ def train_supervised():
             num_layers=CONFIG.model.num_layers,
             dim_feedforward=CONFIG.model.dim_feedforward,
             max_len=CONFIG.model.max_len,
-            dropout=CONFIG.model.dropout
+            dropout=CONFIG.model.dropout,
+            # Honour the config flag instead of the constructor default (True).
+            # On a 40GB A100 the ~310M model uses only ~20GB, so checkpointing's
+            # ~30% recompute overhead buys memory we don't need — turn it off in
+            # hyperparams.yaml (model.use_gradient_checkpointing: false) to speed
+            # up training. Re-enable if you ever hit an OOM.
+            use_gradient_checkpointing=CONFIG.model.use_gradient_checkpointing,
         ).to(device)
         
         print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -200,7 +240,7 @@ def train_supervised():
         # Gradient accumulation
         grad_accum_steps = CONFIG.training.gradient_accumulation_steps
         
-        print(f"\nStarting v3 scratchpad training...")
+        print(f"\nStarting v4 scratchpad training...")
         print(f"  Samples: {CONFIG.training.num_samples}, Epochs: {CONFIG.training.epochs}")
         print(f"  Batch size: {CONFIG.training.batch_size}, Grad accum: {grad_accum_steps}")
         print(f"  Effective batch: {CONFIG.training.batch_size * grad_accum_steps}")
@@ -301,7 +341,11 @@ def train_supervised():
         os.makedirs(CONFIG.paths.checkpoint_dir, exist_ok=True)
         model_path = CONFIG.paths.pretrained_model
         torch.save(model.state_dict(), model_path)
-        mlflow.pytorch.log_model(model, "model")
+        # NOTE: intentionally NOT calling mlflow.pytorch.log_model. Its formats
+        # are version-fragile (pt2 needs an input_example; "cloudpickle" is
+        # rejected by newer MLflow — only "pickle"/"pt2" are valid) and nothing
+        # here loads via mlflow.pytorch — everything uses torch.load(state_dict).
+        # The weights are still tracked in MLflow via log_artifact below.
         mlflow.log_artifact(model_path)
         
         print(f"\n✅ Training complete. Model saved to: {model_path}")

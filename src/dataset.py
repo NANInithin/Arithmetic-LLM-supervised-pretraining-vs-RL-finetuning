@@ -242,10 +242,10 @@ class ArithmeticDataset(Dataset):
     
     def _get_multiplicand(self, max_digits):
         """Generate multiplicand for multiplication with proper distribution."""
-        n_digits = random.choices(
-            range(1, max_digits + 1),
-            weights=[0.4, 0.3, 0.2, 0.1][:max_digits] + [0] * max(0, max_digits - 4)
-        )[0]
+        # Default digit distribution: bias toward fewer digits
+        base_weights = [0.4, 0.3, 0.2, 0.08, 0.02]
+        weights = (base_weights[:max_digits] + [0.0] * max(0, max_digits - len(base_weights)))
+        n_digits = random.choices(range(1, max_digits + 1), weights=weights)[0]
         n_digits = max(1, min(n_digits, max_digits))
         if n_digits == 1:
             return random.randint(0, 9)
